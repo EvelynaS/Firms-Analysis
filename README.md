@@ -13,14 +13,14 @@ Combines micro-enterprises data from Zambia, Mozambique, Somalia, Ghana, Central
 ## Firms' productivity, Density and Employment distribution
 
 Analysis using firms’ productivity (sales per worker) for over 12,000 firms at the city level across 59 countries and 131 cities from 2014 to 2024, to examine the relationship between city density and firms’ performance productivity
-Additional tests were performed to review the firm’s productivity relationship with jobs uniformity (Lasyam inverse), the spatial spread of economic clusters (Batty entropy = cluster spread), and the size of the economic clusters (Shannon entropy = cluster evenness).
+Additional tests were performed to review the firm’s productivity relationship with job uniformity (Lasyam inverse), the spatial spread of economic clusters (Batty entropy = cluster spread), and the size of the economic clusters (Shannon entropy = cluster evenness).
 1. Combined WBES: Combine all Enterprise survey data & TFP Firm level
-2. Filter WBES combined data: select variables of interest and latest WBES from each country
+2. Filter WBES combined data: select variables of interest and the latest WBES from each country
 3. Filter to only data at the city level (remove regional data) & convert firms ‘sales to 2009 PPP
-4. Firms productivity analysis with density, jobs uniformity (Lasyam inverse), spread of economic and the size of the economic clusters
+4. Firms productivity analysis with density, jobs uniformity (Lasyam inverse), spread of economic activity, and the size of the economic clusters
 
 
 The repository contains:
 
-- Raw data: WBES public data and GHSL public data. Oxford Economics and Cluster Employment Distribution data are not public. The  files with non-public data are stored in the respective WBOneDrive folder 
+- Raw data: WBES public data and GHSL public data are included in the repository. Oxford Economics and Cluster Employment Distribution data are not public. The  files with non-public data are stored in the respective WBOneDrive folder 
 - Processed datasets (containing only public data)
