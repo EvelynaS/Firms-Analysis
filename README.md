@@ -3,7 +3,7 @@ Firm's analysis using WEBs for formal and informal firms
 
 ## Informal + Micro formal enterprises firms analysis 
 Analysis using the Informal and Micro Enterprise Survey, compares micro formal firms and informal firms from 18 cities in eight SSA countries
-Combines micro-enterprises data from Zambia, Mozambique, Somalia, Ghana, Central African Republic and Zimbabwe (WBES, public data, separate files per country ), with the Informal enterprise survey database (version May, 7, 2025). 8  Informal Enterprise Surveys & 6  Micro Enterprise Surveys for 8 SSA countries (Zimbabwe (2017), Zambia (2020), Tanzania (2023), Somalia (2019),  Sudan(2022), Mozambique (2018), Ghana (2022), and the Central African Republic (2023)
+Combines micro-enterprises data from Zambia, Mozambique, Somalia, Ghana, Central African Republic and Zimbabwe (WBES, public data, separate files per country ), with the Informal enterprise survey database (version May, 7, 2025). 8  Informal Enterprise Surveys & 6  Micro Enterprise Surveys for 8 SSA countries (Zimbabwe (2017), Zambia (2020), Tanzania (2023), Somalia (2019),  Sudan(2022), Mozambique (2018), Ghana (2022), and the Central African Republic (2023). The list below of Dofiles and R Markups includes the steps and files for the analysis
 1. Harmonized methodology: merge IE & Micro
 2. Master2: Clean variables and labelling 
 3. WBES survey Informal and Micro Enterprises analysis: only analysis on firm size per city (rest of analysis on Analysis_all_IE_2)
