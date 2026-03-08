@@ -10,7 +10,7 @@ Combines micro-enterprises data from Zambia, Mozambique, Somalia, Ghana, Central
 4. Analysis_all_IE: analysis on IE & Micro 
 5. Informal Enterprise by category: Figure 12 replication: workers by category replication of Figure from Cunningham et. al., with minor changes in categories due to data harmonization
 
-##Firms' productivity, Density and Employment distribution
+## Firms' productivity, Density and Employment distribution
 
 Analysis using firms’ productivity (sales per worker) for over 12,000 firms at the city level across 59 countries and 131 cities from 2014 to 2024, to examine the relationship between city density and firms’ performance productivity
 Additional tests were performed to review the firm’s productivity relationship with jobs uniformity (Lasyam inverse), the spatial spread of economic clusters (Batty entropy = cluster spread), and the size of the economic clusters (Shannon entropy = cluster evenness).
