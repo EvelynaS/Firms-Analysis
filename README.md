@@ -18,3 +18,9 @@ Additional tests were performed to review the firm’s productivity relationship
 2. Filter WBES combined data: select variables of interest and latest WBES from each country
 3. Filter to only data at the city level (remove regional data) & convert firms ‘sales to 2009 PPP
 4. Firms productivity analysis with density, jobs uniformity (Lasyam inverse), spread of economic and the size of the economic clusters
+
+
+The repository contains:
+
+- Raw data: WBES public data and GHSL public data. Oxford Economics and Cluster Employment Distribution data are not public. The  files with non-public data are stored in the respective WBOneDrive folder 
+- Processed datasets (containing only public data)
