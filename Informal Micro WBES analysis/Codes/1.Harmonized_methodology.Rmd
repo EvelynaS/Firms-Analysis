@@ -1,0 +1,286 @@
+---
+title: "Informal & Micro enterprises Harmonized"
+author: "Evelyn Sanchez"
+date: "2025-08-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/eves/Library/CloudStorage/Dropbox/LATAM_WorldBank/2023/2.Cities and Jobs/1. African cities/2. Data")
+```
+
+```{r, echo=FALSE}
+library(foreign)
+library(haven)
+library(readxl)
+library(foreign)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(expss)
+library(grid)
+library(lattice)
+library(survival)
+library(Formula)
+library(Hmisc)
+library(countrycode)
+library(tidyverse)
+```
+# Set Directories
+```{r, echo=FALSE}
+dir_out<-"./Output/" 
+dir_inter<-"./1_Raw_Informal_micro/Intermediate/"
+dir_surveys<-"./1_Raw_Informal_micro/"
+dir_harmonized<-"./1_Raw_Informal_micro/Harmonized"
+dir_micro<-"./1_Raw_Informal_micro/Intermediate/Micro/"
+dir_cities<-"./5_Population/"
+getwd()
+```
+
+
+```{r}
+#library(haven)
+
+# Path to the folde
+
+# List all .dta files in the folder
+files <- list.files(dir_harmonized, pattern = "\\.dta$", full.names = TRUE)
+
+for (i in seq_along(files)) {
+  assign(basename(files[i]), read_dta(files[i], encoding="latin1"), envir = .GlobalEnv)
+}
+```
+
+#Create a list of relevant labels
+```{r}
+vars_rev<-c("idstd", "wmedian", 'stratificationregioncode', 'strata', "country" , "country_abr",'cityx', 'a1', 'a14y', 'c1a', 'a41a', 'a14y','sc2','l1a', 'l1b', 'b3', 'b6a', 'b6b', 'b6c', 'b6d', 'd10', 'b8', 'b8a', 'b10', 'b11', 'b16','c1a', 'c1a1', 'c1a2', 'c1a3', 'c1a4', 'c1a5', 'c3', 'c42a', 'c42c', "d13a", "d11a", 'k4b', 'k4c', 'k4d', 'k4e', 'k10', 'k11', 'k11a', 'r2a', 'r2b', 'r2c', 'r2d', 'r2e', 'r2f', 'r3', 'n7', 'n7a', 'ir1a', 'ir1b', 'ir1c', 'ir1d', 'ir1e', 'ir2', 'ir3', 'ir4', 'ir6', 'ir7', 'ir8', 'ir9', 'ir10', 'r6a', 'r6b', 'r6c', 'r6d', 'secondary', 'interview', "med_str_weights",'c30a', 'c30b', 'c30w', 'd30a', 'e30', 'i30', 'g30a',  'k30', 'j30a', 'j30b', 'j30c', 'j30e', 'j30f', 'h30', 'l30a', 'l30b')
+
+```
+
+```{r}
+vars_micro<-c('id', 'wstrict', 'stratificationregioncode', 'strata',  "country" , "country_abr", 'city', 'a1', 'a14y', 'a41a', 'a14y','sc2','l1a', 'l1b', 'b3', 'b6a', 'b6b', 'b6c', 'b6d', 'd10', 'b8a', 'b10', 'b11', 'b16', 'c1a1', 'c1a2', 'c1a3', 'c1a4', 'c1a5', 'c3', 'c42a', 'c42c', 'ZAMd1', 'ZAMd2', "d11b", "d13a", 'k4a', 'k4b', 'k4c', 'k4d', 'k4e', 'k4f', 'k10', 'k11', 'k11a', 'n7', 'n7a2', 'ir1a', 'ir1b', 'ir1c', 'ir1d', 'ir1e', 'ir2', 'ir3', 'ir4', 'ir6', 'ir7', 'ir8', 'ir9', 'ir10', 'secondary', 'interview', "med_str_weights", "m1a", 'c30a', 'c30b', 'c30w', 'd30a', 'e30', 'i30', 'g30a',  'k30', 'j30a', 'j30b', 'j30c', 'j30e', 'j30f', 'h30', 'l30a', 'l30b')
+
+```
+
+
+#Merging variables 
+```{r}
+
+vars_merge<-c("UCname", "idstd", "id_city",  "iso", "SSA_reg_code", "income", "UCname", "CapitalFlag", "cityclass", "region", "size_class_epoch", "POP" , 'id', 'wmedian', 'strata', 'a14y', 'c1a', 'a41a', 'a14y','sc2','l1a', 'l1b', 'b3', 'b6a', 'b6b', 'b6c', 'b6d', 'd10', 'b8', 'b8a', 'b10', 'b16','c1a', 'c1a1', 'c1a2', 'c1a3', 'c1a4', 'c1a5', 'c3', 'c42a', 'c42c', 'k4a', 'k4b', 'k4c', 'k4d', 'k4e', 'k4f', 'k10', 'k11', 'k11a', 'r2a', 'r2b', 'r2c', 'r2d', 'r2e', 'r2f', 'r3', 'n7', 'n7a2', 'ir1a', 'ir1b', 'ir1c', 'ir1d', 'ir1e', 'ir2', 'ir3', 'ir4', 'ir6', 'ir7', 'ir8', 'ir9', 'ir10', 'r6a', 'r6b', 'r6c', 'r6d', 'secondary', 'interview', "med_str_weights", "m1a",
+'c30a', 'c30b', 'c30w', 'd30a', 'e30', 'i30', 'g30a',  'k30', 'j30a', 'j30b', 'j30c', 'j30e', 'j30f', 'h30', 'l30a', 'l30b', 
+"loc_hh", "loc_n_hh", "sell_buss", "sell_ind", "buy_ind", "buy_buss", "buy_self", "sell_cont", "buy_cont")
+```
+
+```{r}
+compare<-colnames(`Informal-Sector-Enterprise-Surveys-Combined-Raw-Database_May_7_2025.dta`)
+setdiff(vars_rev, compare)
+
+
+```
+
+```{r}
+# filter relevant variables
+
+informal_complete<-`Informal-Sector-Enterprise-Surveys-Combined-Raw-Database_May_7_2025.dta`%>%select(any_of(vars_rev))
+
+#change vars names informal_complete
+colnames(informal_complete)[colnames(informal_complete)=="country_abr"] <- "iso"
+```
+
+
+#Database with population 
+```{r}
+urban<-read_excel(paste0(dir_cities, "1MTUC_SMOD_V1s7_O7noBU_PopTrend_Summary_SHAREWB.xlsx"), sheet = 3)
+
+#create density
+
+urban$pop_den<-urban$POP/urban$AREA_km2
+
+#create city classification
+# Density ≥ 1,500 people per km2;
+#Large – population ≥ 1.5 mil. 
+#Medium – 200,000 £ population < 1.5 mil.  
+#Small – 50,000 £ population < 200,000 
+
+urban$cityclass<-if_else(1500 & urban$POP>=1500000, "Large",
+                         if_else(urban$POP<1500000 & urban$POP>200000, "Medium",
+                                 if_else(urban$POP<200000 & urban$POP>50000, "Small", "Towns")))
+
+urban$size_class_epoch2<-if_else(1500 & urban$POP>=1500000, "3",
+                         if_else(urban$POP<1500000 & urban$POP>200000, "2",
+                                 if_else(urban$POP<200000 & urban$POP>50000, "1", "Towns")))
+
+urban$SSA_flag<-if_else(urban$`SSA sub-region`!=0, 1, 0)
+
+#create city code
+urban$iso<-countrycode(urban$UNLocName, "country.name", "iso3c") 
+
+#Download country group classification
+temp6 <- tempfile()
+download.file("https://ddh-openapi.worldbank.org/resources/DR0095333/download", temp6, mode="wb")
+group_class <- read_excel(temp6, sheet = 1)
+group_class<-group_class%>%select(`Income group`, "Code")
+#add income level
+
+urban<-left_join(urban, group_class, by=c("iso"="Code"))
+urban$income<-if_else(urban$`Income group`=="Upper middle income", "UMIC",
+                      if_else(urban$`Income group`=="Lower middle income", "LMIC", 
+                              if_else(urban$`Income group`=="Low income", "LIC", NA)))
+
+
+#write.csv(urban, paste0(dir_out, "AFR_cities_GHSL.csv"))
+
+#filter cities of interest
+cities20<-c("Beira", "Nampula", "Maputo", "Mogadishu","Bosaso", "Lusaka", "Kitwe", "Ndola", "Accra", "Kamasi", "Tamale", "Khartoum", "Omdurman", "Port Sudan")
+
+urban1<-urban%>%filter(UCname %in% cities20)%>%
+  filter(Year==2020)
+zim<-urban%>%filter(UCname %in% c("Harare", "Gweru", "Mutare", "Bulawayo"))%>%
+  filter(Year==2015)
+cities25<-urban%>%filter(UCname %in% c("Bangui", "Berberati", "Dar es Salaam"))%>%
+  filter(Year==2025)
+
+extracities <- c(
+  "Trujillo",
+  "Denpasar (Bali)",
+  "Jakarta DKI (Java)",
+  "Makassar (Sulawesi)",
+  "Medan (Sumatra)",
+  "Pontianak (Kalimantan)",
+  "Surabaya (Java)",
+  "Battambang",
+  "Phnom Penh",
+  "Siemreap",
+  "Sihanoukville",
+  "Pakse",
+  "Vientiane",
+  "Hyderabad",
+  "Jaipur",
+  "Kochi",
+  "Ludhiana",
+  "Mumbai",
+  "Sehore",
+  "Surat",
+  "Tezpur",
+  "Varanasi",
+  "Chittagong MA",
+  "Cox's Bazar",
+  "Dhaka MA",
+  "Baghdad",
+  "Basrah",
+  "Najaf",
+  "Sulaymaniyah"
+)
+cities_extra<-urban%>%filter(UCname %in% extracities)
+cities<-bind_rows(urban1, zim, cities25, cities_extra)
+
+cities$id_city<-paste0(cities$iso,"_", cities$ID_UC_G0)
+
+#Lima, Trujillo 2020
+#"Vientiane", "Paske" 2020
+#Jakarta, Surabaya, Medan, Makassar, Denpasar, Pontianak #2023
+#Battambang, Phnom Penh, Siemreap, Siahnoukville
+#keep flag for capital city, country 
+#create unique city code
+#mozambique- regions with pop size
+
+colnames(cities)
+# [1] "ID_UC_G0"            "UCname"              "UN_LocID"            "UNLocName"          
+# [5] "SSA sub-region CODE" "SSA sub-region"      "AREA_km2"            "Year"               
+# [9] "POP"                 "BU_km2"              "Lat"                 "Lon"                
+#[13] "CapitalFlag"         "size_class_epoch"    "WUP"                 "Coastal"            
+#[17] "Border"              "pop_den"             "cityclass"           "iso"                
+
+colnames(cities)[colnames(cities)=="SSA sub-region CODE"] <- "SSA_reg_code"
+colnames(cities)[colnames(cities)=="UCname"] <- "cityx"
+cities<-cities%>%select("cityx", "id_city",  "iso", "BU_km2", "SSA_flag", "SSA_reg_code", "income",  "cityclass", "size_class_epoch2", "POP" , "CapitalFlag")
+
+colnames(cities)[colnames(cities)=="size_class_epoch2"] <- "size_class_epoch"
+ 
+#merge with informal
+
+df<-left_join(informal_complete, cities, by=c("iso", "cityx"))
+
+df_all <- df %>%
+  select("idstd", "iso",  "SSA_flag", "SSA_reg_code", "income", "country", "iso", "id_city", "cityx", "cityclass", "size_class_epoch", "POP", everything())
+
+#Write all cities
+write_dta(df_all, paste0(dir_inter, "IE_allcities.dta"))
+
+df_all_SSA<-df_all%>% filter(SSA_flag==1)
+
+
+#Write to only SSA cities
+write_dta(df_all_SSA, paste0(dir_inter, "IE_SSA.dta"))
+```
+
+#MICRO
+```{r}
+#call all files
+#files <- list.files(dir_micro, pattern = "\\.dta$", full.names = TRUE)
+#
+#for (i in seq_along(files)) {
+#  assign(basename(files[i]), read_dta(files[i], encoding="latin1"), envir = .GlobalEnv)
+#}
+```
+#Merge all micro
+```{r}
+
+micro<-bind_rows(ZambiaMicro_intermediate.dta, MozambiqueMicro_intermediate.dta, SomaliaMicro_intermediate.dta, GhanaMicro_intermediate.dta, CentralAfricaMicro_intermediate.dta, ZimbabweMICRO_intermediate.dta)
+
+write_dta(micro, paste0(dir_inter, "Micro_SSA.dta"))
+
+#rm(list = ls())
+```
+
+
+```{r}
+#call all files
+files <- list.files(dir_inter, pattern = "\\.dta$", full.names = TRUE)
+
+for (i in seq_along(files)) {
+  assign(basename(files[i]), read_dta(files[i], encoding="latin1"), envir = .GlobalEnv)
+}
+```
+
+#Adjust Micro
+```{r}
+#
+var_info<-colnames(IE_allcities.dta)
+var_inter<-colnames(Micro_SSA.dta)
+setdiff(var_info, var_inter)
+
+Micro_SSA.dta$SSA_flag<-1
+Micro_SSA.dta$country<-countrycode(Micro_SSA.dta$iso, "iso3c",  "country.name")
+colnames(Micro_SSA.dta)[colnames(Micro_SSA.dta)=="UCname"] <- "cityx"
+colnames(Micro_SSA.dta)[colnames(Micro_SSA.dta)=="d13a"] <- "d13"
+colnames(Micro_SSA.dta)[colnames(Micro_SSA.dta)=="d11a"] <- "d11"
+colnames(Micro_SSA.dta)[colnames(Micro_SSA.dta)=="n7a2"] <- "n7a"
+Micro_SSA.dta$region<-if_else(is.na(Micro_SSA.dta$region), 0, 1)
+Micro_SSA.dta<-Micro_SSA.dta%>%select(-c( "id", "k4a", "k4f", "r3", "n7a"))
+Micro_SSA.dta$c3<-if_else(Micro_SSA.dta$c3==1, 1, if_else(Micro_SSA.dta$c3==2, 2, if_else(Micro_SSA.dta$c3==3 |Micro_SSA.dta$c3==4, 3, if_else(Micro_SSA.dta$c3==5, 4, if_else(Micro_SSA.dta$c3==6, 5, NA)))))
+Micro_SSA.dta$k11a<-if_else(Micro_SSA.dta$k11a==1, 1, if_else(Micro_SSA.dta$k11a==0, 2, NA))
+
+
+#var_info<-colnames(IE_allcities.dta)
+#var_inter<-colnames(Micro_SSA.dta)
+#setdiff(var_info, var_inter)
+
+#informal
+IE_SSA.dta$interview<-"Informal"
+IE_SSA.dta$region<-0
+IE_SSA.dta$a1<-NULL
+IE_SSA.dta$size_class_epoch<-as.double(IE_SSA.dta$size_class_epoch)
+#var_info<-colnames(IE_SSA.dta)
+#var_inter<-colnames(Micro_SSA.dta)
+#setdiff(var_inter, var_info)
+
+
+IE_MICRO_SSA<-bind_rows(IE_SSA.dta, Micro_SSA.dta)
+write_dta(IE_MICRO_SSA, paste0(dir_inter, "IE_Micro_SSA.dta"))
+```
+
+
+
+
