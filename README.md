@@ -13,7 +13,7 @@ Combines micro-enterprises data from Zambia, Mozambique, Somalia, Ghana, Central
 ## Firms' productivity, Density and Employment distribution
 
 Analysis using firms’ productivity (sales per worker) for over 12,000 firms at the city level across 59 countries and 131 cities from 2014 to 2024, to examine the relationship between city density and firms’ performance productivity
-Additional tests were performed to review the firm’s productivity relationship with job uniformity (Lasyam inverse), the spatial spread of economic clusters (Batty entropy = cluster spread), and the size of the economic clusters (Shannon entropy = cluster evenness).
+Additional tests were performed to review the firm’s productivity relationship with job uniformity (Lasym inverse), the spatial spread of economic clusters (Batty entropy = cluster spread), and the size of the economic clusters (Shannon entropy = cluster evenness).
 1. Combined WBES: Combine all Enterprise survey data & TFP Firm level
 2. Filter WBES combined data: select variables of interest and the latest WBES from each country
 3. Filter to only data at the city level (remove regional data) & convert firms ‘sales to 2009 PPP
