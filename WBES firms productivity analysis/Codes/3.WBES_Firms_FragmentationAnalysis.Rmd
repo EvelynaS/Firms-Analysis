@@ -1,0 +1,1279 @@
+---
+title: "Firms_Producitivity"
+author: "Evelyn Sanchez"
+date: "2025-10-21"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/eves/Library/CloudStorage/Dropbox/LATAM_WorldBank/2023/2.Cities and Jobs/1. African cities/2. Data")
+```
+
+```{r, echo=FALSE}
+library(foreign)
+library(haven)
+library(readxl)
+library(foreign)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(expss)
+library(grid)
+library(lattice)
+library(survival)
+library(Formula)
+library(Hmisc)
+library(countrycode)
+library(tidyverse)
+library(WDI)
+library(labelled)
+library(sandwich)      # robust / clustered VCOV
+library(lmtest)        # coeftest, waldtest
+library(clubSandwich)  # cluster-robust tests
+library(margins)       # marginal effects
+library(car)           # deltaMethod
+library(splines)       # natural splines
+library(mgcv)          # GAM (smooths)
+library(ggeffects)   # for tidy predictions
+library(stringi)
+library(fuzzyjoin)
+
+```
+
+# Set Directories
+```{r, echo=FALSE}
+dir_out<-"./Output/firms/" 
+dir_inter<-"./1_Raw_Informal_micro/Intermediate/"
+dir_surveys<-"./1_Raw_Informal_micro/"
+dir_harmonized<-"./1_Raw_Informal_micro/Harmonized"
+dir_micro<-"./1_Raw_Informal_micro/Intermediate/Micro/"
+dir_pop<-"./5_Population/"
+dir_frag<- "./2_Fragmentation/"
+
+getwd()
+```
+
+```{r}
+firms <- read_dta(paste0(dir_inter, "ES_city_productivity2.dta"))
+
+var_label(firms$lprYL_pp) <- "log Labor Productivity (sales per worker) 2009 PPP"
+var_label(firms$lprYL) <- "log Labor Productivity (sales per worker) 2009 constant USD"
+var_label(firms$d2_ppp_nom) <- "Sales current PPP intl$"
+var_label(firms$d2_ppp09) <- "Sales PPP constant 2009 intl$"
+var_label(firms$labor_pp)<-"Sales PPP constant 2009 intl$/per worker"
+
+
+write_dta(firms, paste0(dir_inter, "ES_city_productivity3.dta"))
+```
+
+```{r}
+#cities matched in the Employment prediction & in WBES
+cities_match<-read.csv(paste0(dir_pop,"cities_list.csv"))
+
+firms$year_sur <- str_sub(firms$country, -4)
+
+#get year of survey and country to get density
+df <- firms %>% distinct(iso3c, year_sur)
+
+countries<-unique(firms$iso3c)
+
+ghsl<-read_csv(paste0(dir_pop, "GHS_UCDB_THEME_GHSL_GLOBE_R2024A.csv"), locale = locale(encoding = "LATIN1"))
+ghsl$GC_CNT_GAD_2025[ghsl$GC_CNT_GAD_2025=="México"] <-"Mexico"
+
+ghsl$iso3c<-countrycode(ghsl$GC_CNT_GAD_2025, "country.name", "iso3c")
+
+ghsl1 <- ghsl %>%
+  select(iso3c, ID_UC_G0, GC_UCN_MAI_2025, GC_CNT_GAD_2025, starts_with("GH_XST_D30"))
+
+
+ghsl1 <- ghsl1 %>%
+  rename_with(~ str_remove(.x, "^GH_XST_D30_"), starts_with("GH_XST_D30_"))
+
+ghsl_long <- ghsl1 %>%
+  pivot_longer(
+    cols = matches("^(19|20)\\d{2}$"),   # columns named 1975, 1980, …, 2025
+    names_to   = "year",
+    values_to  = "density",
+    names_transform = list(year = as.integer)
+  ) %>%
+  select(iso3c, ID_UC_G0, GC_UCN_MAI_2025, GC_CNT_GAD_2025, year, density) %>%
+  arrange(iso3c, ID_UC_G0, year) 
+
+#get population
+
+ghsl_pop <- ghsl%>%
+  select(iso3c, ID_UC_G0, GC_UCN_MAI_2025, GC_CNT_GAD_2025, starts_with("GH_POP_TOT"))
+
+ghsl_pop <- ghsl_pop %>%
+  rename_with(~ str_remove(.x, "^GH_POP_TOT_"), starts_with("GH_POP_TOT_"))
+
+ghsl_pop_long <- ghsl_pop %>%
+  pivot_longer(
+    cols = matches("^(19|20)\\d{2}$"),   # columns named 1975, 1980, …, 2025
+    names_to   = "year",
+    values_to  = "pop_ghsl",
+    names_transform = list(year = as.integer)
+  ) %>%
+  select(iso3c, ID_UC_G0, GC_UCN_MAI_2025, GC_CNT_GAD_2025, year, pop_ghsl) %>%
+  arrange(iso3c, ID_UC_G0, year) 
+
+# make sure years are numeric
+df <- df %>%
+  mutate(year_sur = as.integer(year_sur))
+
+# join by closest year: population
+ghsl_closest <- ghsl_long %>%
+  inner_join(df, by = "iso3c") %>% 
+  mutate(diff = abs(year - year_sur)) %>% 
+  group_by(iso3c, ID_UC_G0, year_sur) %>% 
+  slice_min(order_by = diff, n = 1, with_ties = FALSE) %>% 
+  ungroup()
+
+ghsl_pop <- ghsl_pop_long %>%
+  inner_join(df, by = "iso3c") %>% 
+  mutate(diff = abs(year - year_sur)) %>% 
+  group_by(iso3c, ID_UC_G0, year_sur) %>% 
+  slice_min(order_by = diff, n = 1, with_ties = FALSE) %>% 
+  ungroup()
+
+names_match<-read.csv(paste0(dir_inter,"correct_names_manual.csv"))
+
+names_match1<-names_match$name_ghsl
+colnames(names_match)[colnames(names_match)=="name_ghsl"] <- "GC_UCN_MAI_2025"
+names_match <- names_match %>%
+  filter(!is.na(GC_UCN_MAI_2025), GC_UCN_MAI_2025 != "")
+
+ghsl_den<-ghsl_closest%>%filter(GC_UCN_MAI_2025 %in% names_match1)
+den<-ghsl_den%>%select(GC_UCN_MAI_2025,ID_UC_G0)
+
+ghsl_pop<-ghsl_pop%>%filter(GC_UCN_MAI_2025 %in% names_match1)
+pop<-ghsl_pop%>%select(ID_UC_G0, pop_ghsl)
+
+##
+den<-left_join(den, names_match, by="GC_UCN_MAI_2025")
+den$GC_UCN_MAI_2025<-NULL
+ghsl_den<-left_join(ghsl_den, den, by="ID_UC_G0")
+ghsl_den<-left_join(ghsl_den, pop, by="ID_UC_G0")
+colnames(ghsl_den)[colnames(ghsl_den)=="name"] <- "a3ax"
+colnames(ghsl_den)[colnames(ghsl_den)=="year"] <- "year_den_ghsl"
+colnames(ghsl_den)[colnames(ghsl_den)=="GC_UCN_MAI_2025"] <- "ghsl_name"
+
+ghsl_den<-ghsl_den%>%select("iso3c", "ID_UC_G0", "ghsl_name", "year_den_ghsl", "density",  "pop_ghsl", "a3ax")
+ghsl_den <- ghsl_den[ghsl_den$ID_UC_G0 != "10472", ]
+
+
+```
+
+
+```{r}
+### IGNORE: Fragmentation data (older version, only used to match city names)
+
+#frag<-read.csv(paste0(dir_frag,"fragmentation_data.csv"))
+
+#frag$city <- sub("^.{4}", "", frag$city)
+
+#write.csv(firm_data, paste0(dir_inter, "frag_correct_names.csv"), row.names = FALSE)
+#macth
+
+#ghsl_name<- data.frame(names_match$GC_UCN_MAI_2025)
+#colnames(ghsl_name)<-c("name_ghsl")
+#frag_name<-data.frame(frag$city)
+#colnames(frag_name)<-c("name_frag")
+#ghsl_firms <- ghsl_firms %>% distinct(name_ghsl)
+
+
+#for(i in 1:dim(ghsl_name)[1]) {
+# x <- agrep(ghsl_name$name_ghsl[i], frag_name$name_frag,
+ #ignore.case=TRUE, value=TRUE,
+# max.distance = 0.09, useBytes = TRUE)
+ #x <- paste0(x,"")
+# ghsl_name$name_frag2[i] <- x
+#} 
+
+#matches <- stringdist_join(names_match, frag,
+#                           by = c("GC_UCN_MAI_2025" = "city"),
+#                           mode = "left",
+#                           max_dist = 2, # tune this threshold
+#                           method = "lv") # Levenshtein distance
+#matches
+
+# 1) Helper to normalize city names safely
+#norm_city <- function(x) {
+#  x %>%
+#    stri_enc_toutf8(is_unknown_8bit = TRUE) %>%      # fix invalid encodings → UTF-8
+#    stri_trans_general("Latin-ASCII") %>%            # drop accents (e.g., São → Sao)
+#    tolower() %>%
+#    stri_trim_both() %>%
+#    stri_replace_all_regex("\\s+", " ") %>%          # collapse multiple spaces
+#    stri_replace_all_regex("[^a-z0-9 \\-]", "")      # strip odd punctuation (keep hyphens)
+#}
+
+# 2) Make cleaned columns on both data frames (don’t overwrite your originals)
+#names_match2 <- ghsl_den%>%select(iso3c, ID_UC_G0, ghsl_name)%>%
+#  mutate(city_clean = norm_city(ghsl_name))
+
+
+#frag2 <- frag %>% select(city)%>%
+#  mutate(city_clean = norm_city(city))
+
+#matches_raw <- stringdist_join(
+#  names_match2, frag2,
+#  by = c("city_clean" = "city_clean"),
+#  mode = "left",
+#  method = "jw",
+#  max_dist = 0.18,
+#  distance_col = "dist"
+#)
+
+#matches <- matches_raw %>%
+ # group_by(ghsl_name) %>%
+  #slice_min(dist, with_ties = FALSE) %>%
+#  ungroup()
+
+#matches$city[matches$ID_UC_G0=="7963"] <- "delhi"
+
+
+#matches_raw<-matches%>%select(ID_UC_G0, ghsl_name, city)
+#frag <- frag %>%
+ # mutate(city_clean = norm_city(city))
+#colnames(frag)[colnames(frag)=="city"] <- "frag_name"
+#colnames(frag)[colnames(frag)=="city_clean"] <- "city"
+
+#matched_raw<-left_join(matches_raw, frag, by="city")
+
+#sum(is.na(matched_raw$shannon))
+#46/57
+
+#sum(is.na(matched_raw$city))
+#46/45
+
+#add all to firms
+#matched_raw<-matched_raw%>%select(ID_UC_G0, shannon, shannon_normalised, batty, batty_normalised)
+
+#ghsl_den2<-left_join(ghsl_den, matched_raw, by="ID_UC_G0")
+
+#sum(is.na(ghsl_den2$shannon))
+#merge with firms data
+
+
+
+#firms2<-left_join(firms, ghsl_den2, by = c("a3ax", "iso3c"))
+
+
+
+#unique(firms2$a3ax)
+
+
+```
+#Join productivity data  with fragmentation 2 (employment clusters data)
+#Fragemntation data 
+#lasym inv=Job uniformity=values closer to 0 indicate concentrated job distribution and those closer to 1 indicate uniform job spread.
+#Batty (spread of clusters)= spatial spread of clusters across the city  
+#Shannon (how even clusters are in size)= evenness of cluster size 
+```{r}
+#get the list with all codes to match
+codes<-read.csv(paste0(dir_inter, "FUA_ID_UC.csv"))
+#list with the cities matched 
+cities_list<-read.csv(paste0(dir_frag, "fragmentation_data_v2.csv"))
+cities_list<-cities_list$city
+#list with the latest data (including lasym)
+frag3<-read.csv(paste0(dir_frag, "fragmentation_data_v3_1.csv"))
+frag32<-frag3%>%filter(city %in% cities_list)
+fuas<-frag32$eFUA_ID
+codes2<-codes%>%filter(eFUA_ID %in%fuas)
+#81 cities
+frag_84<-left_join(codes2, frag32, by="eFUA_ID")
+colnames(frag_84)[colnames(frag_84)=="id_uc_g0"] <- "ID_UC_G0"
+
+new_mesures<-left_join(ghsl_den, frag_84, by="ID_UC_G0")
+
+firms_v4<-left_join(firms, new_mesures, by = c("a3ax", "iso3c"))
+
+firms_v4$region_name<-ifelse(firms_v4$region==1, "SSA", ifelse(firms_v4$region==2, "EAP", ifelse(firms_v4$region==4, "LAC", ifelse(firms_v4$region==5, "MNA", ifelse(firms_v4$region==6, "SAR", NA)))))
+
+
+####check how many cities
+firms1<-firms_v4%>%filter(!is.na(lprYL_pp))
+firms1 %>%
+  distinct(country, region_name) %>%
+ count(region_name, name = "n_cities")
+
+firms1<-firms_v4%>%filter(!is.na(lprYL_pp))
+firms1 %>%
+  distinct(country, region_name) %>%
+ count(region_name, name = "n_cities")
+
+test<-firms1%>%filter(region_name=="EAP")
+test%>%distinct(iso3c) #gshl_name
+firms1$ghsl_name
+###with productivity and density data (18345 FIRMS)
+#countries
+#EAP	14			
+#LAC	13			
+#MNA	5			
+#SAR	5			
+#SSA	26
+
+#cities
+#EAP	24			
+#LAC	26			
+#MNA	18			
+#SAR	15			
+#SSA	55	
+
+firms1<-firms_v4%>%filter(!is.na(city))
+firms1 %>%
+  distinct(city, region_name) %>%
+ count(region_name, name = "n_cities")
+
+test<-firms1%>%filter(region_name=="EAP")
+test%>%distinct(iso3c) #gshl_name
+firms1$ghsl_name
+
+### with fragementation data (count if has "city" name)
+#countries
+#EAP	6			
+#LAC	8			
+#SAR	3			
+#SSA	15
+
+#firms1 %>%
+#  distinct(city, region_name) %>%
+# count(region_name, name = "n_cities")
+#cities
+#EAP	8			
+#LAC	20			
+#SAR	12			
+#SSA	36
+
+#number of cities per r
+
+table(firms_v4)
+```
+#clean space
+```{r}
+#clean directory
+keep <- c("firms", "firms_v4", "firms2", "firms_v4",  "frag", "prod", "prod2", "dir_out", "dir_inter", "dir_pop", "dir_frag", "dir_surveys", "ghsl_den", "ghsl_den2")
+rm(list = setdiff(ls(), keep))
+
+
+colnames(firms_v4)
+colnames(firms_v4)[colnames(firms_v4)=="batty"] <- "Batty"
+colnames(firms_v4)[colnames(firms_v4)=="shannon"] <- "Shannon"
+colnames(firms_v4)[colnames(firms_v4)=="lasym_flipped"] <- "Lasym_inv"
+```
+
+
+#Winsorize variables 
+```{r}
+firms_v4$id_city<-firms_v4$ID_UC_G0
+
+#Winsorize density 
+#firms3<-firms2%>%filter(a3ax!="Abuja")
+firms_v4$ln_density <- ifelse(is.finite(firms_v4$density) & firms_v4$density > 0,
+                            log(firms_v4$density),
+                            NA_real_)
+x <- firms_v4$ln_density
+qs <- quantile(x, c(0.01, 0.99), na.rm = TRUE)
+firms_v4$ln_density_win <- pmin(pmax(x, qs[1]), qs[2])
+
+#Winsorize productivity
+x <- firms_v4$lprYL_pp
+qs <- quantile(x, c(0.01, 0.99), na.rm = TRUE)
+firms_v4$lprYL_pp_win <- pmin(pmax(x, qs[1]), qs[2])
+                              
+firms_v4$region_name<-ifelse(firms_v4$region==1, "SSA", ifelse(firms_v4$region==2, "EAP", ifelse(firms_v4$region==4, "LAC", ifelse(firms_v4$region==5, "MNA", ifelse(firms_v4$region==6, "SAR", NA)))))
+#firms_v4$ln_density_win <- DescTools::Winsorize(firms2$ln_density, probs = c(0.01, 0.99), na.rm = TRUE)
+
+# log population
+firms_v4$ln_pop <- ifelse(is.finite(firms_v4$pop_ghsl) & firms_v4$pop_ghsl > 0,
+                            log(firms_v4$pop_ghsl),
+                            NA_real_)
+x <- firms_v4$ln_pop
+qs <- quantile(x, c(0.01, 0.99), na.rm = TRUE)
+firms_v4$ln_pop_win <- pmin(pmax(x, qs[1]), qs[2])
+
+
+# log roads
+
+firms_v4$ln_roads <- ifelse(is.finite(firms_v4$road_dens_ghsl) & firms_v4$road_dens_ghsl > 0,
+                            log(firms_v4$road_dens_ghsl),
+                            NA_real_)
+x <- firms_v4$ln_roads
+qs <- quantile(x, c(0.01, 0.99), na.rm = TRUE)
+firms_v4$ln_roads_win <- pmin(pmax(x, qs[1]), qs[2])
+
+#range(firms_v4$road_dens_ghsl, na.rm = T)
+
+
+#no EAP or MENA - just to test 
+firms5<-firms_v4%>%filter(region_name!="EAP")
+firms5<-firms5%>%filter(region_name!="MNA")
+
+#Save data 
+write.csv(firms_v4, paste0(dir_out, "Prod_Firms_Fragmenta_complete.csv"), row.names = FALSE)
+write.csv(firms5, paste0(dir_out, "Prod_Firms_Fragmenta_complete_noEAP_MNA.csv"), row.names = FALSE)
+#Save data 
+```
+
+#Check correlations 
+```{r}
+library(corrplot)
+corr_vars <- firms_v4 %>%
+  select(lprYL_pp_win, ln_density_win, Shannon, Batty, Lasym_inv, ln_pop_win, ln_roads_win)
+
+corr_matrix <- cor(corr_vars, use = "complete.obs")
+png(paste0(dir_out, "correlation_matrix.png"), height = 800, width = 800)
+corrplot(corr_matrix, method = "color", type = "upper",
+         addCoef.col = "black", tl.col = "black", tl.srt = 45)
+
+
+png(paste0(dir_out, "correlation_matrix.png"), height = 800, width = 800)
+```
+
+# Simple regression firms productivity with density
+```{r}
+library(modelsummary)
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win + ln_size + ln_age + ln_exp + multi + region_name + sector_MS+ 
+    #ln_pop_win+ 
+   # ln_roads_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+# Create modelsummary table
+suppressWarnings(
+modelsummary(
+  list("Log Labor Prod. (sales per worker)" = mod_infer1),
+  vcov = cl_vcov,                    # <—— use this, not vcov_iso
+  gof_map = c("nobs", "r.squared"),
+  coef_omit = "factor(iso3c)|factor(a14y)|factor(region_name)|factor(sector_MS)",
+  coef_map = c(
+    "ln_density_win"    = "Log Density",
+    "ln_pop_win"    = "Log Population",
+    "ln_roads_win" = "Road Density",
+    "ln_size" = "Log Firm size",
+    "ln_age" = "Log age of establishment",
+    "ln_exp" = "Log owners experience", 
+    "multi" = "Multi establishment"
+  ),
+  stars = TRUE,
+  title = "lprYL_pp_win ~ ln_density_win +  ln_size + ln_age + ln_pop_win+
+    ln_exp + multi + factor(region_name) + factor(sector_MS) + 
+    + factor(iso3c) + factor(a14y)",
+  fmt = 3,
+  output = file.path(dir_out, "model_desity_v4_allfirms.html")
+))
+#ln_pop_win +
+#d0 <- firms_v4
+
+#d0$region_name <- factor(d0$region_name)
+#d0$sector_MS   <- factor(d0$sector_MS)
+#d0$iso3c       <- factor(d0$iso3c)
+#d0$a14y        <- factor(d0$a14y)
+```
+```{r}
+vars <- c(
+  "lprYL_pp_win","ln_density_win","ln_pop_win","ln_size","ln_age","ln_exp","multi",
+  "region_name","sector_MS","iso3c","a14y",
+  "w_city_norm","id_city"              # <- make sure both are here
+)
+
+mf2 <- droplevels(na.omit(firms_v4[ , vars]))
+
+m_noPop <- lm(
+  lprYL_pp_win ~ ln_density_win + ln_size + ln_age + ln_exp + multi +
+    factor(region_name) + factor(sector_MS) + factor(iso3c) + factor(a14y),
+  data = mf2, weights = w_city_norm, na.action = na.exclude
+)
+
+m_withPop <- lm(
+  lprYL_pp_win ~ ln_density_win + ln_pop_win + ln_size + ln_age + ln_exp + multi +
+    factor(region_name) + factor(sector_MS) + factor(iso3c) + factor(a14y),
+  data = mf2, weights = w_city_norm, na.action = na.exclude
+)
+
+#library(sandwich); library(lmtest); library(car)
+V_pop <- vcovCL(m_withPop, cluster = ~ id_city, type = "HC1") 
+
+car::linearHypothesis(m_withPop, "ln_pop_win = 0", vcov = V_pop, singular.ok = TRUE)
+```
+
+# Simple regression firms productivity with density: EMTRENDS (regional trends)
+```{r}
+mod_lin_byreg <- lm(
+  lprYL_pp_win ~ ln_density_win * region_name + ln_size + ln_age + ln_exp + multi+
+    sector_MS + iso3c + a14y,
+  data = firms_v4, weights = w_city_norm, na.action = na.exclude
+)
+
+# Predictions over the observed support of ln_density, by region
+pred <- ggpredict(mod_lin_byreg, terms = c("ln_density_win [all]", "region_name"))
+
+# Plot
+ggplot(pred, aes(x = x, y = predicted, color = group)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group),
+              alpha = 0.12, color = NA) +
+  labs(
+    x = "Log city density (winsorized)",
+    y = "Predicted log productivity (sales per worker)",
+    color = "Region", fill = "Region",
+    title = "Density–productivity trends by region (controls held fixed)"
+  ) +
+  theme_minimal(base_size = 12)
+
+#ggsave(paste0(dir_out, "graph trends.png"), height = 2.5, width = 4, units = "in")
+library(emmeans)
+V_lin <- vcovCL(mod_lin_byreg, cluster = ~ id_city, type = "HC1")
+
+# Per-region slopes (elasticities) of ln_density_win
+emtr <- emtrends(
+  mod_lin_byreg,
+  specs = ~ region_name,
+  var   = "ln_density_win",
+  vcov. = V_lin
+) %>% summary(infer = c(TRUE, TRUE))
+
+# Make a neat data frame
+slopes <- emtr %>%
+  as.data.frame() %>%
+  rename(beta = ln_density_win.trend,
+         se   = SE,
+         lo   = lower.CL,
+         hi   = upper.CL,
+         p.value= p.value)
+
+# Forest plot
+slopes$stars <- cut(slopes$p.value,
+                    breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+                    labels = c("***","**","*","+",""))
+
+tree<-ggplot(slopes, aes(x = beta, y = region_name)) +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.15) +
+  geom_text(aes(label = stars), vjust = -.3, hjust = -1, size = 7) +
+  #  geom_text(aes(label = sprintf("p=%.3f", p.value)),
+    #        hjust = -0.2, size = 3)+
+  geom_vline(xintercept = 0, linetype = 2) +
+  labs(
+    x = "Elasticity of productivity(In sales per worker) ~ log density",
+    y = "",
+    title = "Regional elasticities"
+  ) +
+  theme_set(theme_minimal()+
+  theme(axis.text.y = element_text(size = 10), 
+                axis.text.x = element_text(size = 8),
+                axis.title.x= element_text(size = 8),
+        axis.title.y= element_text(size = 10),
+        plot.title = element_text(size = 14)))
+tree
+
+ggsave(paste0(dir_out, "tree_linear_no_frag_all_firms.png"), plot = tree, height = 2.5, width = 4, units = "in")
+```
+#Model with lasym 
+```{r}
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win + Lasym_inv + ln_size + ln_age + ln_exp + multi + region_name + sector_MS
+    #+ln_pop_win
+    + iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+# Create modelsummary table
+suppressWarnings(
+modelsummary(
+  list("Log Labor Prod. (sales per worker)" = mod_infer1),
+  vcov = cl_vcov,                    # <—— use this, not vcov_iso
+  gof_map = c("nobs", "r.squared"),
+  coef_omit = "factor(iso3c)|factor(a14y)|factor(region_name)|factor(sector_MS)",
+  coef_map = c(
+    "ln_density_win"    = "Log Density",
+    "Lasym_inv"= "Lasym inverse",
+    "ln_pop_win"    = "Log Population", 
+    "ln_size" = "Log Firm size",
+    "ln_age" = "Log age of establishment",
+    "ln_exp" = "Log owners experience", 
+    "multi" = "Multi establishment"
+  ),
+  stars = TRUE,
+  title = "lprYL_pp_win ~ ln_density_win +  ln_size + ln_age + ln_pop_win+
+    ln_exp + multi + region_name + sector_MS + 
+    + iso3c + year",
+  fmt = 3,
+  output = file.path(dir_out, "model_desity_lasym.html")
+))
+
+#### get regional trends 
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*region_name + Lasym_inv + ln_size + ln_age + ln_exp + multi + sector_MS+ #ln_pop_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+#Per-region slopes (elasticities) of ln_density_win
+emtr <- emtrends(
+  mod_infer1,
+  specs = ~ region_name,
+  var   = "ln_density_win",
+  vcov. = cl_vcov 
+) %>% summary(infer = c(TRUE, TRUE))
+
+# Make a neat data frame
+slopes <- emtr %>%
+  as.data.frame() %>%
+  rename(beta = ln_density_win.trend,
+         se   = SE,
+         lo   = lower.CL,
+         hi   = upper.CL,
+         p.value= p.value)
+slopes 
+#interaction with lasym
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*Lasym_inv + ln_size + ln_age + ln_exp + multi + region_name + sector_MS 
+   +ln_pop_win 
+  +  iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+# Create modelsummary table
+suppressWarnings(
+modelsummary(
+  list("Log Labor Prod. (sales per worker)" = mod_infer1),
+  vcov = cl_vcov,                    # <—— use this, not vcov_iso
+  gof_map = c("nobs", "r.squared"),
+  coef_omit = "factor(iso3c)|factor(a14y)|factor(region_name)|factor(sector_MS)",
+  coef_map = c(
+    "ln_density_win"    = "Log Density",
+    "Lasym_inv"= "Lasym inverse",
+    "ln_density_win:Lasym_inv"= "Log density*Lasym inv",
+    "ln_pop_win"    = "Log Population", 
+    "ln_size" = "Log Firm size",
+    "ln_age" = "Log age of establishment",
+    "ln_exp" = "Log owners experience", 
+    "multi" = "Multi establishment"
+  ),
+  stars = TRUE,
+  title = "lprYL_pp_win ~ ln_density_win*Lasym_inv +  ln_size + ln_age + ln_pop_win+
+    ln_exp + multi + region_name + sector_MS + 
+    + iso3c + year",
+  fmt = 3,
+  output = file.path(dir_out, "model_desity_lasym_interv2.html")
+))
+
+#interaction lasym and region
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*Lasym_inv*region_name + ln_size + ln_age + ln_exp + multi + sector_MS+ ln_pop_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+emtr <- emtrends(
+  mod_infer1,
+  specs = ~ region_name,
+  var   = "ln_density_win",
+  vcov. = cl_vcov, 
+  nuisance = c("sector_MS", "iso3c", "a14y"),
+) %>% summary(infer = c(TRUE, TRUE))
+emtr
+# Make a neat data frame
+slopes <- emtr %>%
+  as.data.frame() %>%
+  rename(regional_beta = ln_density_win.trend,
+         se   = SE,
+         lo   = lower.CL,
+         hi   = upper.CL,
+         p.value= p.value)
+slopes 
+
+
+
+dens_slopes <- emtrends(
+  mod_infer1,
+  var = "ln_density_win",
+  specs = ~ region_name * Lasym_inv,
+  at = list(Lasym_inv = quantile(firms_v4$Lasym_inv, probs = c(0.1, 0.5, 0.9), na.rm = TRUE))
+)
+
+summary(dens_slopes, infer = c(TRUE, TRUE))
+ #region_name regional_beta        se    df         lo        hi t.ratio p.value
+# EAP                    NA        NA    NA         NA        NA      NA      NA
+ #LAC             0.7023743 0.2093671 10191  0.2919737 1.1127750   3.355  0.0008
+ #SAR            -0.3422273 0.5358064 10191 -1.3925133 0.7080586  -0.639  0.5230
+ #SSA            -0.2226588 0.3766278 10191 -0.9609233 0.5156058  -0.591  0.5544
+#Results are averaged over the levels of: 3 nuisance factors, multi 
+#Confidence level used: 0.95 
+```
+
+
+#Model with Batty 
+```{r}
+range(firms_v4$Batty, na.rm =T)
+firms_v4$batty_z <- scale(firms_v4$Batty)
+
+range(firms5$Batty, na.rm =T)
+firms5$batty_z <- scale(firms5$Batty)
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win + batty_z + ln_size + ln_age + ln_exp + multi + region_name + sector_MS
+    #+ln_pop_win
+    +ln_roads_win
+    +iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+# Create modelsummary table
+suppressWarnings(
+modelsummary(
+  list("Log Labor Prod. (sales per worker)" = mod_infer1),
+  vcov = cl_vcov,                    # <—— use this, not vcov_iso
+  gof_map = c("nobs", "r.squared"),
+  coef_omit = "factor(iso3c)|factor(a14y)|factor(region_name)|factor(sector_MS)",
+  coef_map = c(
+    "ln_density_win"    = "Log Density",
+    "batty_z"= "Batty (rescaled)",
+    #"Lasym_inv"= "Lasym inverse",
+    "ln_roads_win" = "Road Density",
+    "ln_pop_win"    = "Log Population", 
+    "ln_size" = "Log Firm size",
+    "ln_age" = "Log age of establishment",
+    "ln_exp" = "Log owners experience", 
+    "multi" = "Multi establishment"
+  ),
+  stars = TRUE,
+  title = "lprYL_pp_win ~ ln_density_win +  batty_z+  ln_size + ln_age + 
+    ln_exp + multi + region_name + sector_MS 
+    + iso3c + year",
+  fmt = 3,
+  output = file.path(dir_out, "model_desity_batty2.html")
+))
+
+
+#### get regional trends 
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*region_name + batty_z + ln_size + ln_age + ln_exp + multi + sector_MS #ln_pop_win+
+    +ln_pop_win
+    +ln_roads_win
+    +iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+#Per-region slopes (elasticities) of ln_density_win
+emtr <- emtrends(
+  mod_infer1,
+  specs = ~ region_name,
+  var   = "ln_density_win",
+  vcov. = cl_vcov 
+) %>% summary(infer = c(TRUE, TRUE))
+emtr
+# Make a neat data frame
+#slopes <- emtr %>%
+ # as.data.frame() %>%
+ # rename(beta = ln_density_win.trend,
+ #        se   = SE,
+ #        lo   = lower.CL,
+ #        hi   = upper.CL,
+  #       p.value= p.value)
+#slopes 
+
+###########Interaction with batty
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*batty_z + ln_size + ln_age + ln_exp + multi + region_name + sector_MS #ln_pop_win+ 
+  +ln_pop_win
+    +ln_roads_win
+    +iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+##### Create modelsummary table
+suppressWarnings(
+modelsummary(
+  list("Log Labor Prod. (sales per worker)" = mod_infer1),
+  vcov = cl_vcov,                    # <—— use this, not vcov_iso
+  gof_map = c("nobs", "r.squared"),
+  coef_omit = "factor(iso3c)|factor(a14y)|factor(region_name)|factor(sector_MS)",
+  coef_map = c(
+    "ln_density_win"    = "Log Density",
+    "ln_density_win:batty_z"= "Log Density*Batty (rescaled)",
+    #"Lasym_inv"= "Lasym inverse",
+    #"ln_pop_win"    = "Log Population", 
+    "ln_size" = "Log Firm size",
+    "ln_roads_win"= "RoadsIn",
+    "ln_age" = "Log age of establishment",
+    "ln_exp" = "Log owners experience", 
+    "multi" = "Multi establishment"
+  ),
+  stars = TRUE,
+  title = "lprYL_pp_win ~ ln_density_win* batty_z+  ln_size + ln_age + 
+    ln_exp + multi + region_name + sector_MS 
+    + iso3c + year",
+  fmt = 3,
+  output = file.path(dir_out, "model_desity_batty_inter.html")
+))
+
+#####interaction batty and region
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*batty_z*region_name + ln_size + ln_age + ln_exp + multi + sector_MS #ln_pop_win+ 
+   +ln_pop_win
+    +ln_roads_win+  
+  iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+
+emtr <- emtrends(
+  mod_infer1,
+  specs = ~ region_name,
+  var   = "ln_density_win",
+  vcov. = cl_vcov, 
+  nuisance = c("sector_MS", "iso3c", "a14y"),
+) %>% summary(infer = c(TRUE, TRUE))
+emtr 
+
+emtr <- emtrends(
+  mod_infer1,
+  specs = ~ region_name* batty_z,
+  var   = "ln_density_win",
+  vcov. = cl_vcov, 
+   at    = list(batty_z = c(-1, 0, 1)),
+  nuisance = c("sector_MS", "iso3c", "a14y"),
+) %>% summary(infer = c(TRUE, TRUE))
+emtr 
+
+
+emtr  <- as.data.frame(summary(emtr , infer = c(TRUE, TRUE)))
+write.csv(emtr , paste0(dir_out, "batty_z_regions.csv"), row.names = FALSE)
+```
+#Model with shanon 
+```{r}
+range(firms_v4$Shannon, na.rm =T)
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win + Shannon + ln_size + ln_age + ln_exp + multi + region_name + sector_MS#+ #ln_pop_win+ 
+    #+ln_pop_win
+    #+ln_roads_win +
+   +iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+# Create modelsummary table
+suppressWarnings(
+modelsummary(
+  list("Log Labor Prod. (sales per worker)" = mod_infer1),
+  vcov = cl_vcov,                    # <—— use this, not vcov_iso
+  gof_map = c("nobs", "r.squared"),
+  coef_omit = "factor(iso3c)|factor(a14y)|factor(region_name)|factor(sector_MS)",
+  coef_map = c(
+    "ln_density_win"    = "Log Density",
+    "Shannon"= "Shannon",
+    #"Lasym_inv"= "Lasym inverse",
+    #"ln_pop_win"    = "Log Population", 
+    "ln_size" = "Log Firm size",
+    "ln_age" = "Log age of establishment",
+    "ln_exp" = "Log owners experience", 
+    "multi" = "Multi establishment"
+  ),
+  stars = TRUE,
+  title = "lprYL_pp_win ~ ln_density_win +  Shannon+  ln_size + ln_age + 
+    ln_exp + multi + region_name + sector_MS 
+    + iso3c + year",
+  fmt = 3,
+  output = file.path(dir_out, "model_desity_shannon.html")
+))
+
+#### get regional trends 
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*region_name + Shannon + ln_size + ln_age + ln_exp + multi + sector_MS+ #ln_pop_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+#Per-region slopes (elasticities) of ln_density_win
+emtr <- emtrends(
+  mod_infer1,
+  specs = ~ region_name,
+  var   = "ln_density_win",
+  vcov. = cl_vcov 
+) %>% summary(infer = c(TRUE, TRUE))
+emtr
+# Make a neat data frame
+#slopes <- emtr %>%
+ # as.data.frame() %>%
+ # rename(beta = ln_density_win.trend,
+ #        se   = SE,
+ #        lo   = lower.CL,
+ #        hi   = upper.CL,
+  #       p.value= p.value)
+#slopes 
+
+###########Interaction with shannon
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*Shannon + ln_size + ln_age + ln_exp + multi + region_name + sector_MS+ #ln_pop_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+##### Create modelsummary table
+suppressWarnings(
+modelsummary(
+  list("Log Labor Prod. (sales per worker)" = mod_infer1),
+  vcov = cl_vcov,                    # <—— use this, not vcov_iso
+  gof_map = c("nobs", "r.squared"),
+  coef_omit = "factor(iso3c)|factor(a14y)|factor(region_name)|factor(sector_MS)",
+  coef_map = c(
+    "ln_density_win"    = "Log Density",
+    "ln_density_win:Shannon"= "Log Density*Shannon",
+    #"Lasym_inv"= "Lasym inverse",
+    #"ln_pop_win"    = "Log Population", 
+    "ln_size" = "Log Firm size",
+    "ln_age" = "Log age of establishment",
+    "ln_exp" = "Log owners experience", 
+    "multi" = "Multi establishment"
+  ),
+  stars = TRUE,
+  title = "lprYL_pp_win ~ ln_density_win*Shannon+  ln_size + ln_age + 
+    ln_exp + multi + region_name + sector_MS 
+    + iso3c + year",
+  fmt = 3,
+  output = file.path(dir_out, "model_desity_shannon_inter.html")
+))
+
+#####interaction shannon and region
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*Shannon*region_name + ln_size + ln_age + ln_exp + multi + sector_MS+ #ln_pop_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+
+emtr <- emtrends(
+  mod_infer1,
+  specs = ~ region_name,
+  var   = "ln_density_win",
+  vcov. = cl_vcov, 
+  nuisance = c("sector_MS", "iso3c", "a14y"),
+) %>% summary(infer = c(TRUE, TRUE))
+emtr 
+
+emtr <- emtrends(
+  mod_infer1,
+  specs = ~ region_name*Shannon
+  var   = "ln_density_win",
+  vcov. = cl_vcov, 
+   at    = list(Shannon = c(-1, 0, 1)),
+  nuisance = c("sector_MS", "iso3c", "a14y"),
+) %>% summary(infer = c(TRUE, TRUE))
+emtr 
+```
+
+
+```{r}
+
+mod_quad  <- lm(
+  lprYL_pp_win ~ ln_density_win + I(ln_density_win^2) + ln_size + ln_age + ln_exp + multi + region_name + sector_MS+ #ln_pop_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_quad, cluster = ~ id_city, type = "HC1")
+coeftest(mod_quad, vcov = cl_vcov)
+
+
+mod_quad_reg  <- lm(
+  lprYL_pp_win ~ (ln_density_win + I(ln_density_win^2))*region_name + ln_size + ln_age + ln_exp + multi + region_name + sector_MS+ #ln_pop_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_quad_reg , cluster = ~ id_city, type = "HC1")
+coeftest(mod_quad_reg , vcov = cl_vcov)
+
+
+##### Create modelsummary table
+suppressWarnings(
+modelsummary(
+  list("Log Labor Prod. (sales per worker)" = mod_quad),
+  vcov = cl_vcov,                    # <—— use this, not vcov_iso
+  gof_map = c("nobs", "r.squared"),
+  coef_omit = "factor(iso3c)|factor(a14y)|factor(region_name)|factor(sector_MS)",
+  coef_map = c(
+    "ln_density_win"    = "Log Density",
+    "I(ln_density_win^2)"= "Log Densityˆ2",
+    #"Lasym_inv"= "Lasym inverse",
+    #"ln_pop_win"    = "Log Population", 
+    "ln_size" = "Log Firm size",
+    "ln_age" = "Log age of establishment",
+    "ln_exp" = "Log owners experience", 
+    "multi" = "Multi establishment"
+  ),
+  stars = TRUE,
+  title = "lprYL_pp_win ~ ln_density_winI+ (ln_density_win^2)+  ln_size + ln_age + 
+    ln_exp + multi + region_name + sector_MS 
+    + iso3c + year",
+  fmt = 3,
+  output = file.path(dir_out, "model_desity_quadratic2.html")
+))
+
+
+mod_quad2  <- lm(
+  lprYL_pp_win ~ ln_density_win + I(ln_density_win^2) + ln_size + ln_age + ln_exp + multi + region_name + sector_MS+ ln_pop_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_quad2, cluster = ~ id_city, type = "HC1")
+coeftest(mod_quad2, vcov = cl_vcov)
+
+
+##### Create modelsummary table
+suppressWarnings(
+modelsummary(
+  list("Log Labor Prod. (sales per worker)" = mod_quad2),
+  vcov = cl_vcov,                    # <—— use this, not vcov_iso
+  gof_map = c("nobs", "r.squared"),
+  coef_omit = "factor(iso3c)|factor(a14y)|factor(region_name)|factor(sector_MS)",
+  coef_map = c(
+    "ln_density_win"    = "Log Density",
+    "I(ln_density_win^2)"= "Log Densityˆ2",
+    #"Lasym_inv"= "Lasym inverse",
+    "ln_pop_win"    = "Log Population", 
+    "ln_size" = "Log Firm size",
+    "ln_age" = "Log age of establishment",
+    "ln_exp" = "Log owners experience", 
+    "multi" = "Multi establishment"
+  ),
+  stars = TRUE,
+  title = "lprYL_pp_win ~ ln_density_winI+ (ln_density_win^2)+  ln_size + ln_age + In_pop + 
+    ln_exp + multi + region_name + sector_MS 
+    + iso3c + year",
+  fmt = 3,
+  output = file.path(dir_out, "model_desity_quadratic_pop.html")
+))
+
+
+#######Quadratic with regional slopes
+
+mod_quad2_region <- lm(
+  lprYL_pp_win ~ (ln_density_win + I(ln_density_win^2))*region_name + ln_size + ln_age + ln_exp + multi + sector_MS+ ln_pop_win+ 
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_quad2_region, cluster = ~ id_city, type = "HC1")
+coeftest(mod_quad2_region, vcov = cl_vcov)
+
+
+emtr_quad <- emtrends(
+  mod_quad2_region,
+  ~ region_name,
+  var =  c("ln_density_win"),
+  nuisance = c("sector_MS", "iso3c", "a14y"),
+  vcov. = cl_vcov)
+
+summary(emtr_quad, infer = c(TRUE, TRUE))
+
+emtr_quad <- emtrends(
+  mod_quad2_region,
+  ~ region_name,
+  var =  c("I(ln_density_win^2)"),
+  nuisance = c("sector_MS", "iso3c", "a14y"),
+  vcov. = cl_vcov)
+
+summary(emtr_quad, infer = c(TRUE, TRUE))
+
+
+####get population size 
+
+```
+
+```{r}
+pred_curve <- ggpredict(
+ mod_quad2_region,
+  terms = c("ln_density_win [all]", "region_name")
+)
+
+ggplot(pred_curve, aes(x = x, y = predicted, color = group)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group),
+              alpha = 0.15, color = NA) +
+  labs(x = "Log city density",
+       y = "Predicted log productivity (sales per worker)",
+       color = "Region", fill = "Region",
+       title = "Quadratic density–productivity relationship by region") +
+  theme_minimal(base_size = 13)
+
+ggsave(paste0(dir_out, "curavature_cuadratic_pop.png"), plot = curve, height = 2.5, width = 4, units = "in")
+```
+```{r}
+grid <- seq(min(firms_v4$ln_density_win, na.rm = TRUE),
+            max(firms_v4$ln_density_win, na.rm = TRUE),
+            length.out = 40)
+
+emtr_quad <- emtrends(
+  mod_quad2_region,
+  ~ region_name | ln_density_win,
+  var = "ln_density_win",
+  at  = list(ln_density_win = grid),
+  nuisance = c("sector_MS", "iso3c", "a14y"),
+  vcov. = cl_vcov 
+)
+slopes <- as.data.frame(emtr_quad)
+
+ggplot(slopes, aes(x = ln_density_win, y = ln_density_win.trend, color = region_name)) +
+  geom_line(size = 1.1) +
+  geom_ribbon(aes(ymin = lower.CL, ymax = upper.CL, fill = region_name),
+              alpha = 0.15, color = NA) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(x = "Log density",
+       y = "Elasticity of productivity w.r.t. density",
+       color = "Region", fill = "Region",
+       title = "Marginal effect of density by region (quadratic model)") +
+  theme_minimal(base_size = 13)
+```
+```{r}
+coefs <- coef(mod_quad2_region)
+regions <- levels(firms_v4$region_name)
+tp <- sapply(regions, function(r){
+  b1 <- coefs[paste0("ln_density_win")]
+  b2 <- coefs["I(ln_density_win^2)"]
+  if(r != regions[1]) {
+    if(paste0("ln_density_win:region_name", r) %in% names(coefs))
+      b1 <- b1 + coefs[paste0("ln_density_win:region_name", r)]
+    if(paste0("I(ln_density_win^2):region_name", r) %in% names(coefs))
+      b2 <- b2 + coefs[paste0("I(ln_density_win^2):region_name", r)]
+  }
+  data.frame(region = r,
+             b1 = b1,
+             b2 = b2,
+             lnD_star = -b1/(2*b2))
+})
+tp <- do.call(rbind, tp)
+tp$D_star <- exp(tp$lnD_star)
+tp
+```
+
+#ROADS
+```{r}
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win + ln_roads+ ln_size + ln_age + ln_exp + multi + region_name + sector_MS
+    #+ln_pop_win
+    + iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*ln_roads+ ln_size + ln_age + ln_exp + multi + region_name + sector_MS
+    #+ln_pop_win
+    + iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+####ROADS INTERACTION 
+
+mod_infer1 <- lm(
+  lprYL_pp_win ~ ln_density_win*ln_roads*region_name + ln_size + ln_age + ln_exp + multi + sector_MS+  
+    iso3c + a14y,
+  data = firms_v4,
+  weights = w_city_norm,
+  na.action = na.exclude
+)
+cl_vcov <- sandwich::vcovCL(mod_infer1, cluster = ~ id_city, type = "HC1")
+coeftest(mod_infer1, vcov = cl_vcov)
+
+emtr <- emtrends(
+  mod_infer1,
+  specs = ~ region_name,
+  var   = "ln_density_win",
+  vcov. = cl_vcov, 
+  nuisance = c("sector_MS", "iso3c", "a14y"),
+) %>% summary(infer = c(TRUE, TRUE))
+emtr
+
+
+
+dens_slopes <- emtrends(
+  mod_infer1,
+  var = "ln_density_win",
+  specs = ~ region_name * ln_roads,
+  at = list(ln_roads = quantile(firms_v4$ln_roads, probs = c(0.1, 0.5, 0.9), na.rm = TRUE))
+)
+
+summary(dens_slopes, infer = c(TRUE, TRUE))
+```
+
+
+
+
+

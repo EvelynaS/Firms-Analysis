@@ -1,0 +1,132 @@
+---
+title: "Firm Productivity clean: Filter to only data at the city level (remove regional data) & convert firms'sales to 2009 PPP "
+author: "Evelyn Sanchez"
+date: "2025-08-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/eves/Library/CloudStorage/Dropbox/LATAM_WorldBank/2023/2.Cities and Jobs/1. African cities/2. Data")
+```
+
+```{r, echo=FALSE}
+library(foreign)
+library(haven)
+library(readxl)
+library(foreign)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(expss)
+library(grid)
+library(lattice)
+library(survival)
+library(Formula)
+library(Hmisc)
+library(countrycode)
+library(tidyverse)
+library(WDI)
+library(labelled)
+
+library(sandwich)      # robust / clustered VCOV
+library(lmtest)        # coeftest, waldtest
+library(clubSandwich)  # cluster-robust tests
+library(margins)       # marginal effects
+library(car)           # deltaMethod
+library(splines)       # natural splines
+library(mgcv)          # GAM (smooths)
+#library(ggeffects) 
+```
+# Set Directories
+```{r, echo=FALSE}
+dir_out<-"./Output/" 
+dir_inter<-"./1_Raw_Informal_micro/Intermediate/"
+dir_surveys<-"./1_Raw_Informal_micro/"
+dir_harmonized<-"./1_Raw_Informal_micro/Harmonized"
+dir_micro<-"./1_Raw_Informal_micro/Intermediate/Micro/"
+dir_pop<-"./5_Population/"
+dir_frag<- "./2_Fragmentation/"
+
+getwd()
+```
+
+```{r}
+cities.df <- read_dta(paste0(dir_harmonized, "/Test/combined_data_WBES_US_constant_filtered2.dta"))
+```
+
+```{r}
+cities.df$a3ax<-gsub(" ", "", cities.df$a3ax)
+
+list_cities<-c("Abidjan", "Abuja", "Addisababa", "Amman", "ApiaUpolu", "Arequipa", "Arusha", "Asuncion", "Auckland", "Baghdad", "Bago", "Bahri", "Bamako", "Bangkok", "Bangui", "Barishal", "Barranquilla", "Basrah", "Beirut", "Berberati", "Blantyre", "Bo", "Bogota", "Brazzaville", "BuenosAires", "Bujumbura", "Bulawayo", "Busan", "Cali", "Canelones", "Cartagena", "Chattogram", "Chiclayo", "Cochabamba", "Conakry", "Cordoba",  "Dakar", "Dar-es-salaam", "Delhi", "DhakaMA", "Dili", "Dodoma", "Dredawa", "Enugu", "Erbil", "Gitega", "Gombe", "GreaterCairo", "GreaterDhaka", "GreaterGuatemalaCity", "GreaterLuanda", "Hail", "Harare", "Herat", "HongKongSARCHina", "Honiara", "Incheon", "Islamabad", "Jalalabad", "Jazan", "Jeju", "Juba", "Kabul" ,"Kaduna", "Kandahar", "Kano", "Karbala", "Kasungu", "Katsina", "Kenema", "Khartoum", "Khulna", "Kiambu", "Kigali", "Kilifi", "Kingston", "Kinshasa", "Kirkuk", "Kisumu", "Kitwe", "LAE", "LaPaz", "Lagos", "Lilongwe", "Lima", "Livingstone", "Lomé" , "LuangPrabang", "Lusaka", "Machakos", "Managua", "Mandalay", "Mangochi", "Maputo(Greater)", "Maradi", "Maseru", "Mazar-E-Sharif", "Mbeya", "Mecca", "Medellin", "Medina", "Mendoza", "MetroCebu", "MetroManila", "MexicoCity", "Mombasa", "Montevideo", "Monywa", "N'Djamena", "Nabatieh", "Nairobi", "Najaf", "Najran", "Nakuru", "Nampula", "Ndola", "Ngozi", "Niamey", "Nimule", "Nouadhibou", "Nouakchott", "OmDurman", "POM", "PhnomPenh", "Phuentsholing", "Piura", "Pointe-Noire", "Rajshahi", "Riyadh", "Rosario", "SanSalvador", "SantaCruz", "SantoDomingo", "Seoul", "Singapore", "Sokoto", "SpecialCapitalRegionofJakarta", "SpecialRegionofYogyakarta", "Sulaymaniyah", "Sylhet", "Savannakhét", "Tabouk", "Taunggyi", "Tegucigalpa", "Tete", "Torit", "Trujillo", "Tucuman", "Ulaanbaatar", "Vientiane", "Yangon", "Yei", "Zarqa", "Zomba")
+
+
+cities.df<-cities.df%>%filter(a3ax %in% list_cities)
+#unique(cities.df$a3ax)
+colnames(cities.df)
+```
+#convert firms'sales to 2009 PPP
+```{r}
+# Get the country-year universe needed
+yrs <- range(cities.df$d2_l1_year_perf_indicators, na.rm = TRUE)
+cities.df$iso3c<-countrycode(cities.df$country2, "country.name", "iso3c") 
+ctys <- unique(cities.df$iso3c)
+
+wdi_ppp <- WDI(country = ctys,
+               indicator = "PA.NUS.PPP",
+               start = yrs[1], end = yrs[2], extra = FALSE) %>%
+  transmute(iso3c = iso3c,  # WDI returns iso2c & iso3c; keep iso3c
+            year,
+            ppp_factor = PA.NUS.PPP)
+
+summary(wdi_ppp$ppp_factor)
+cities.df$year_d2<-cities.df$d2_l1_year_perf_indicators
+colnames(wdi_ppp)[colnames(wdi_ppp)=="year"] <- "year_d2"
+
+firms <- cities.df %>%
+  left_join(wdi_ppp, by = c("iso3c", "year_d2"))
+
+
+```
+
+```{r}
+firms<-firms%>%
+  mutate(across(where(is.numeric), ~ replace(., . %in% c(-7, -5, -9), NA)))
+#d2 = In Last Fiscal Year, What Were This Establishment’S Total Annual Sales?
+
+# 4) Construct PPP-adjusted sales
+#   A: convert nominal LCU -> current PPP intl$
+#   B: deflate to 2009 using your existing per-firm U.S. deflator factor
+firms <- firms %>%
+  mutate(
+    d2_ppp_nom  = ifelse(!is.na(d2) & !is.na(ppp_factor) & ppp_factor > 0,
+                         d2 / ppp_factor, NA_real_),
+    d2_ppp09    = ifelse(!is.na(d2_ppp_nom) & !is.na(deflator_usd_adjust_d2),
+                         d2_ppp_nom / deflator_usd_adjust_d2, NA_real_),
+  )
+
+firms$labor_pp<-firms$d2_ppp09/firms$wk14
+firms$lprYL_pp<-log(firms$labor_pp)
+
+var_label(firms$lprYL_pp) <- "log Labor Productivity (sales per worker) 2009 PPP"
+var_label(firms$lprYL) <- "log Labor Productivity (sales per worker) 2009 constant USD"
+var_label(firms$d2_ppp_nom) <- "Sales current PPP intl$"
+var_label(firms$d2_ppp09) <- "Sales PPP constant 2009 intl$"
+
+#Weights normalized by city 
+firms <- firms %>%
+  group_by(iso3c, a3ax) %>%
+  mutate(
+    w_city_sum = sum(wt, na.rm = TRUE),
+    w_city_norm = wt / w_city_sum
+  ) %>%
+  ungroup()
+var_label(firms$w_city_norm) <- "Weights normalized by city"
+
+firms%>%
+  group_by(iso3c, a3ax) %>%
+  summarise(sum_norm = sum(w_city_norm, na.rm = TRUE))
+
+
+write_dta(firms, paste0(dir_inter, "ES_city_productivity2.dta"))
+```
