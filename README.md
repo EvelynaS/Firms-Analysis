@@ -18,4 +18,3 @@ Additional tests were performed to review the firm’s productivity relationship
 2. Filter WBES combined data: select variables of interest and latest WBES from each country
 3. Filter to only data at the city level (remove regional data) & convert firms ‘sales to 2009 PPP
 4. Firms productivity analysis with density, jobs uniformity (Lasyam inverse), spread of economic and the size of the economic clusters
-<img width="468" height="637" alt="image" src="https://github.com/user-attachments/assets/578503fb-427e-4578-98a7-e4f87786378c" />
